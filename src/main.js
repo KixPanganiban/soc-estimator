@@ -20,6 +20,7 @@ let map;
 let directionsService;
 let directionsRenderer;
 let userApiKey = '';
+let segmentPolylines = [];
 
 // Check if API key is stored in localStorage
 function checkStoredApiKey() {
@@ -72,7 +73,7 @@ function loadGoogleMapsScript(apiKey) {
     }
     
     const script = document.createElement('script');
-    script.src = `https://maps.googleapis.com/maps/api/js?key=${apiKey}&libraries=places&callback=initMap`;
+    script.src = `https://maps.googleapis.com/maps/api/js?key=${apiKey}&libraries=places,geometry&callback=initMap`;
     script.async = true;
     script.defer = true;
     script.onerror = () => {
@@ -96,7 +97,10 @@ window.initMap = function() {
         });
 
         directionsService = new google.maps.DirectionsService();
-        directionsRenderer = new google.maps.DirectionsRenderer();
+        directionsRenderer = new google.maps.DirectionsRenderer({
+            suppressPolylines: true, // We'll draw our own colored segments
+            preserveViewport: false
+        });
         directionsRenderer.setMap(map);
 
         const startAutocomplete = new google.maps.places.Autocomplete(startPoint);
@@ -115,6 +119,9 @@ window.initMap = function() {
         
         console.log('Google Maps initialized successfully');
         
+        // Update departure time options
+        updateDepartureTimeOptions();
+        
         // Load saved inputs and set up persistence after map loads
         loadInputs();
         setupInputPersistence();
@@ -126,12 +133,158 @@ window.initMap = function() {
     }
 }
 
+// Generate departure time options
+function generateDepartureTimeOptions() {
+    const now = new Date();
+    const options = [];
+    
+    // Add "Now" option
+    options.push({ value: 'now', text: 'Now' });
+    
+    // Get current hour and round up to next hour
+    const currentHour = now.getHours();
+    const currentMinutes = now.getMinutes();
+    
+    // Start from next hour if we're past 0 minutes
+    let startHour = currentMinutes > 0 ? currentHour + 1 : currentHour;
+    
+    // Generate options for next 24 hours
+    for (let i = 0; i < 24; i++) {
+        const hour = (startHour + i) % 24;
+        const isPM = hour >= 12;
+        const displayHour = hour === 0 ? 12 : hour > 12 ? hour - 12 : hour;
+        const period = isPM ? 'PM' : 'AM';
+        
+        // Create date object for this time
+        const optionDate = new Date(now);
+        optionDate.setHours(hour, 0, 0, 0);
+        
+        // If the hour is before current hour, it's tomorrow
+        if (hour < currentHour || (hour === currentHour && currentMinutes > 0)) {
+            optionDate.setDate(optionDate.getDate() + 1);
+        }
+        
+        // Format the display text
+        const dayText = optionDate.toDateString() === now.toDateString() ? 'Today' : 'Tomorrow';
+        const timeText = `${displayHour}:00 ${period}`;
+        const fullText = `${timeText} (${dayText})`;
+        
+        options.push({
+            value: optionDate.toISOString(),
+            text: fullText,
+            date: optionDate
+        });
+    }
+    
+    return options;
+}
+
+// Update departure time select options
+function updateDepartureTimeOptions() {
+    const departureTimeSelect = document.getElementById('departure-time');
+    const currentValue = departureTimeSelect.value;
+    const options = generateDepartureTimeOptions();
+    
+    // Clear existing options
+    departureTimeSelect.innerHTML = '';
+    
+    // Add new options
+    options.forEach(option => {
+        const optionElement = document.createElement('option');
+        optionElement.value = option.value;
+        optionElement.textContent = option.text;
+        departureTimeSelect.appendChild(optionElement);
+    });
+    
+    // Try to restore previous value if it was a time
+    if (currentValue && currentValue !== 'now' && currentValue.includes('T')) {
+        departureTimeSelect.value = currentValue;
+    }
+}
+
+// Get icon for maneuver type
+function getManeuverIcon(maneuver) {
+    const icons = {
+        'turn-left': '↰',
+        'turn-right': '↱',
+        'turn-slight-left': '↖',
+        'turn-slight-right': '↗',
+        'turn-sharp-left': '⤺',
+        'turn-sharp-right': '⤻',
+        'straight': '↑',
+        'merge': '⤵',
+        'ramp-left': '⤶',
+        'ramp-right': '⤷',
+        'fork-left': '⤛',
+        'fork-right': '⤜',
+        'keep-left': '⬅',
+        'keep-right': '➡',
+        'roundabout-left': '↻',
+        'roundabout-right': '↺',
+        'uturn-left': '↶',
+        'uturn-right': '↷'
+    };
+    return icons[maneuver] || '';
+}
+
+// Clear previous segment polylines from map
+function clearSegmentPolylines() {
+    segmentPolylines.forEach(polyline => {
+        polyline.setMap(null);
+    });
+    segmentPolylines = [];
+}
+
+// Draw colored segments on map
+function drawSegmentsOnMap(segments) {
+    clearSegmentPolylines();
+    
+    segments.forEach(segment => {
+        if (segment.polyline && segment.polyline.points) {
+            const path = google.maps.geometry.encoding.decodePath(segment.polyline.points);
+            
+            const polyline = new google.maps.Polyline({
+                path: path,
+                geodesic: true,
+                strokeColor: segment.color,
+                strokeOpacity: 0.8,
+                strokeWeight: 6,
+                zIndex: 100
+            });
+            
+            polyline.setMap(map);
+            segmentPolylines.push(polyline);
+            
+            // Add info window on click
+            const infoWindow = new google.maps.InfoWindow({
+                content: `
+                    <div style="padding: 8px; min-width: 200px;">
+                        <p style="font-weight: bold; margin: 0 0 4px 0;">Segment ${segment.index + 1}</p>
+                        <p style="margin: 0; font-size: 12px; color: #666;">${segment.instruction.replace(/<[^>]*>/g, '').substring(0, 50)}...</p>
+                        <hr style="margin: 8px 0; border-color: #e5e7eb;">
+                        <p style="margin: 0; font-size: 12px;">Speed: ${segment.avgSpeed.toFixed(0)} km/h</p>
+                        <p style="margin: 0; font-size: 12px;">Traffic: <span style="color: ${segment.color}">●</span> ${segment.trafficCondition}</p>
+                        <p style="margin: 0; font-size: 12px;">Distance: ${segment.distance.toFixed(1)} km</p>
+                        <p style="margin: 0; font-size: 12px;">Energy: ${segment.adjustedConsumption.toFixed(2)} kWh</p>
+                    </div>
+                `
+            });
+            
+            polyline.addListener('click', (event) => {
+                infoWindow.setPosition(event.latLng);
+                infoWindow.open(map);
+            });
+        }
+    });
+}
+
 // Analyze route segments and calculate traffic for each
 function analyzeRouteSegments(route, avgMileageKwh, batteryCapacityKwh) {
     const segments = [];
     const steps = route.steps || [];
     
     steps.forEach((step, index) => {
+        
         const segmentDistance = step.distance.value / 1000; // km
         const segmentDuration = step.duration.value; // seconds
         
@@ -142,29 +295,52 @@ function analyzeRouteSegments(route, avgMileageKwh, batteryCapacityKwh) {
         let trafficCondition = 'normal';
         let trafficFactor = 1.0;
         let consumptionMultiplier = 1.0;
+        let color = '#10b981'; // Default green
         
-        // Analyze based on average speed
-        if (avgSpeed < 20) {
+        // Analyze based on average speed with color gradient
+        if (avgSpeed < 15) {
+            trafficCondition = 'very heavy';
+            trafficFactor = 1.6;
+            consumptionMultiplier = 0.75; // Most efficient in very slow traffic
+            color = '#dc2626'; // Red
+        } else if (avgSpeed < 25) {
             trafficCondition = 'heavy';
-            trafficFactor = 1.5;
-            consumptionMultiplier = 0.8; // More efficient in stop-and-go
+            trafficFactor = 1.4;
+            consumptionMultiplier = 0.8;
+            color = '#ef4444'; // Light red
         } else if (avgSpeed < 40) {
             trafficCondition = 'moderate';
             trafficFactor = 1.2;
             consumptionMultiplier = 0.9;
-        } else if (avgSpeed > 80) {
+            color = '#f97316'; // Orange
+        } else if (avgSpeed < 60) {
+            trafficCondition = 'normal';
+            trafficFactor = 1.0;
+            consumptionMultiplier = 1.0;
+            color = '#f59e0b'; // Amber
+        } else if (avgSpeed < 80) {
             trafficCondition = 'light';
+            trafficFactor = 0.9;
+            consumptionMultiplier = 1.1;
+            color = '#84cc16'; // Lime
+        } else {
+            trafficCondition = 'very light';
             trafficFactor = 0.8;
-            consumptionMultiplier = 1.2; // Less efficient at high speeds
+            consumptionMultiplier = 1.2; // Least efficient at high speeds
+            color = '#10b981'; // Green
         }
         
         // Calculate energy consumption for this segment
         const baseConsumption = (segmentDistance / 100) * avgMileageKwh;
         const adjustedConsumption = baseConsumption * consumptionMultiplier;
         
+        // Extract instruction for info window display
+        const instruction = step.html_instructions || `Step ${index + 1}`;
+        
         segments.push({
             index: index,
-            instruction: step.html_instructions,
+            instruction: instruction,
+            maneuver: step.maneuver || '',
             distance: segmentDistance,
             duration: segmentDuration,
             avgSpeed: avgSpeed,
@@ -172,7 +348,11 @@ function analyzeRouteSegments(route, avgMileageKwh, batteryCapacityKwh) {
             trafficFactor: trafficFactor,
             baseConsumption: baseConsumption,
             adjustedConsumption: adjustedConsumption,
-            consumptionMultiplier: consumptionMultiplier
+            consumptionMultiplier: consumptionMultiplier,
+            color: color,
+            polyline: step.polyline,
+            startLocation: step.start_location,
+            endLocation: step.end_location
         });
     });
     
@@ -210,26 +390,19 @@ function calculateRoute() {
     estimateBtn.disabled = true;
 
     // Calculate departure time
-    const now = new Date();
     let departureTimeValue;
     
-    switch(departureTime.value) {
-        case 'now':
-            // Set to 1 minute in future to ensure we get traffic data
-            departureTimeValue = new Date(now.getTime() + 60000);
-            break;
-        case '15min':
-            departureTimeValue = new Date(now.getTime() + 15 * 60000);
-            break;
-        case '30min':
-            departureTimeValue = new Date(now.getTime() + 30 * 60000);
-            break;
-        case '1hour':
-            departureTimeValue = new Date(now.getTime() + 60 * 60000);
-            break;
-        case '2hours':
-            departureTimeValue = new Date(now.getTime() + 120 * 60000);
-            break;
+    if (departureTime.value === 'now') {
+        // Set to 1 minute in future to ensure we get traffic data
+        departureTimeValue = new Date(Date.now() + 60000);
+    } else {
+        // Parse the ISO date string
+        departureTimeValue = new Date(departureTime.value);
+        
+        // Ensure the departure time is in the future
+        if (departureTimeValue < new Date()) {
+            departureTimeValue = new Date(Date.now() + 60000);
+        }
     }
 
     // Build request with traffic options
@@ -261,7 +434,16 @@ function calculateRoute() {
             const travelTime = route.duration.text;
             
             // Process route segments (steps)
-            const segments = analyzeRouteSegments(route, avgMileageValue, batteryCapacityValue);
+            let segments = [];
+            try {
+                segments = analyzeRouteSegments(route, avgMileageValue, batteryCapacityValue);
+                if (segments.length > 0) {
+                    drawSegmentsOnMap(segments);
+                }
+            } catch (error) {
+                console.error('Error analyzing route segments:', error);
+                // Continue with route-level analysis if segment analysis fails
+            }
             
             // Log the route data to debug
             console.log('Route data:', {
@@ -347,34 +529,46 @@ function calculateRoute() {
                 segmentsHTML = `
                     <div class="mt-6">
                         <h3 class="text-md font-semibold mb-3">Route Segments Analysis</h3>
+                        <div class="mb-3 flex items-center gap-3 text-xs">
+                            <span class="font-medium">Speed Legend:</span>
+                            <div class="flex items-center gap-1">
+                                <div class="w-3 h-3 rounded-full" style="background-color: #dc2626"></div>
+                                <span>&lt;15 km/h</span>
+                            </div>
+                            <div class="flex items-center gap-1">
+                                <div class="w-3 h-3 rounded-full" style="background-color: #f97316"></div>
+                                <span>25-40 km/h</span>
+                            </div>
+                            <div class="flex items-center gap-1">
+                                <div class="w-3 h-3 rounded-full" style="background-color: #f59e0b"></div>
+                                <span>40-60 km/h</span>
+                            </div>
+                            <div class="flex items-center gap-1">
+                                <div class="w-3 h-3 rounded-full" style="background-color: #10b981"></div>
+                                <span>&gt;80 km/h</span>
+                            </div>
+                        </div>
                         <div class="max-h-64 overflow-y-auto">
                             <table class="w-full text-sm">
                                 <thead class="bg-gray-50 sticky top-0">
                                     <tr>
                                         <th class="px-2 py-1 text-left">#</th>
-                                        <th class="px-2 py-1 text-left">Segment</th>
                                         <th class="px-2 py-1 text-right">Distance</th>
-                                        <th class="px-2 py-1 text-center">Traffic</th>
+                                        <th class="px-2 py-1 text-center">Speed/Traffic</th>
                                         <th class="px-2 py-1 text-right">Energy</th>
                                     </tr>
                                 </thead>
                                 <tbody class="divide-y divide-gray-200">
                                     ${segments.map((seg, idx) => {
-                                        const trafficColor = seg.trafficCondition === 'heavy' ? 'text-green-600' : 
-                                                           seg.trafficCondition === 'light' ? 'text-yellow-600' : 'text-gray-600';
-                                        const trafficIcon = seg.trafficCondition === 'heavy' ? '🚦' : 
-                                                          seg.trafficCondition === 'light' ? '🏎️' : '🚗';
                                         return `
                                             <tr class="hover:bg-gray-50">
                                                 <td class="px-2 py-1">${idx + 1}</td>
-                                                <td class="px-2 py-1">
-                                                    <div class="truncate max-w-xs" title="${seg.instruction.replace(/<[^>]*>/g, '')}">
-                                                        ${seg.instruction.replace(/<[^>]*>/g, '').substring(0, 40)}...
-                                                    </div>
-                                                </td>
                                                 <td class="px-2 py-1 text-right">${seg.distance.toFixed(1)} km</td>
                                                 <td class="px-2 py-1 text-center">
-                                                    <span class="${trafficColor}">${trafficIcon} ${seg.avgSpeed.toFixed(0)} km/h</span>
+                                                    <div class="flex items-center justify-center gap-1">
+                                                        <div class="w-3 h-3 rounded-full" style="background-color: ${seg.color}"></div>
+                                                        <span>${seg.avgSpeed.toFixed(0)} km/h</span>
+                                                    </div>
                                                 </td>
                                                 <td class="px-2 py-1 text-right">${seg.adjustedConsumption.toFixed(2)} kWh</td>
                                             </tr>
@@ -383,7 +577,7 @@ function calculateRoute() {
                                 </tbody>
                                 <tfoot class="bg-gray-100 font-semibold">
                                     <tr>
-                                        <td colspan="2" class="px-2 py-1">Total</td>
+                                        <td class="px-2 py-1">Total</td>
                                         <td class="px-2 py-1 text-right">${distance.toFixed(1)} km</td>
                                         <td class="px-2 py-1"></td>
                                         <td class="px-2 py-1 text-right">${adjustedEnergyConsumed.toFixed(1)} kWh</td>
