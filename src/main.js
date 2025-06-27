@@ -238,6 +238,179 @@ function clearSegmentPolylines() {
     segmentPolylines = [];
 }
 
+// Draw charts for segment analysis
+function drawSegmentCharts(segments, startSoc, batteryCapacity) {
+    // Destroy any existing charts first
+    if (window.socChart && window.socChart instanceof Chart) {
+        window.socChart.destroy();
+        window.socChart = null;
+    }
+    if (window.efficiencyChart && window.efficiencyChart instanceof Chart) {
+        window.efficiencyChart.destroy();
+        window.efficiencyChart = null;
+    }
+    
+    // Wait for DOM to update
+    setTimeout(() => {
+        // Chart 1: SOC over distance
+        const socCanvas = document.getElementById('soc-chart');
+        if (socCanvas && segments && segments.length > 0) {
+            // Get fresh context
+            const socCtx = socCanvas.getContext('2d');
+            
+            // Calculate cumulative distance and SOC at each point
+            let cumulativeDistance = 0;
+            let currentSoc = startSoc;
+            const socData = [{x: 0, y: startSoc}]; // Start point
+            
+            segments.forEach(segment => {
+                cumulativeDistance += segment.distance;
+                const socUsed = (segment.adjustedConsumption / batteryCapacity) * 100;
+                currentSoc -= socUsed;
+                socData.push({x: cumulativeDistance, y: currentSoc});
+            });
+            
+            // Create multiple datasets for each segment with different colors
+            const datasets = [];
+            let prevPoint = socData[0];
+            
+            segments.forEach((segment, index) => {
+                const currentPoint = socData[index + 1];
+                
+                // Create a dataset for this segment
+                datasets.push({
+                    label: `Segment ${index + 1}`,
+                    data: [prevPoint, currentPoint],
+                    borderColor: segment.color,
+                    backgroundColor: segment.color + '20',
+                    borderWidth: 3,
+                    tension: 0.1,
+                    fill: false,
+                    pointRadius: index === 0 ? 4 : 3,
+                    pointHoverRadius: 6,
+                    showLine: true
+                });
+                
+                prevPoint = currentPoint;
+            });
+            
+            window.socChart = new Chart(socCtx, {
+                type: 'line',
+                data: {
+                    datasets: datasets
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            mode: 'index',
+                            intersect: false,
+                            callbacks: {
+                                title: function(context) {
+                                    if (context[0]) {
+                                        return `Distance: ${context[0].parsed.x.toFixed(1)} km`;
+                                    }
+                                    return '';
+                                },
+                                label: function(context) {
+                                    const segmentIndex = context.datasetIndex;
+                                    if (segmentIndex < segments.length) {
+                                        const segment = segments[segmentIndex];
+                                        return [
+                                            `SOC: ${context.parsed.y.toFixed(1)}%`,
+                                            `Speed: ${segment.avgSpeed.toFixed(0)} km/h`,
+                                            `Traffic: ${segment.trafficCondition}`
+                                        ];
+                                    }
+                                    return `SOC: ${context.parsed.y.toFixed(1)}%`;
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        x: {
+                            type: 'linear',
+                            title: { display: true, text: 'Distance (km)' },
+                            ticks: { precision: 0 }
+                        },
+                        y: {
+                            title: { display: true, text: 'State of Charge (%)' },
+                            min: 0,
+                            max: 100,
+                            ticks: { stepSize: 20 }
+                        }
+                    }
+                }
+            });
+        }
+        
+        // Chart 2: Efficiency by segment
+        const efficiencyCanvas = document.getElementById('efficiency-chart');
+        if (efficiencyCanvas && segments && segments.length > 0) {
+            // Get fresh context
+            const effCtx = efficiencyCanvas.getContext('2d');
+            
+            // Calculate efficiency for each segment
+            const efficiencyData = segments.map((segment, index) => ({
+                x: index + 1,
+                y: segment.consumptionMultiplier
+            }));
+            
+            const colors = segments.map(segment => segment.color);
+            
+            window.efficiencyChart = new Chart(effCtx, {
+                type: 'bar',
+                data: {
+                    labels: segments.map((_, i) => `${i + 1}`),
+                    datasets: [{
+                        label: 'Efficiency Multiplier',
+                        data: efficiencyData.map(d => d.y),
+                        backgroundColor: colors,
+                        borderColor: colors,
+                        borderWidth: 1
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    const segment = segments[context.dataIndex];
+                                    return [
+                                        `Efficiency: ${context.parsed.y.toFixed(2)}x`,
+                                        `Speed: ${segment.avgSpeed.toFixed(0)} km/h`,
+                                        `Traffic: ${segment.trafficCondition}`
+                                    ];
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        x: {
+                            title: { display: true, text: 'Segment #' }
+                        },
+                        y: {
+                            title: { display: true, text: 'Efficiency Multiplier' },
+                            min: 0.5,
+                            max: 1.5,
+                            ticks: {
+                                callback: function(value) {
+                                    return value.toFixed(1) + 'x';
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+        }
+    }, 100);
+}
+
 // Draw colored segments on map
 function drawSegmentsOnMap(segments) {
     clearSegmentPolylines();
@@ -286,13 +459,31 @@ function analyzeRouteSegments(route, avgMileageKwh, batteryCapacityKwh) {
     const segments = [];
     const steps = route.steps || [];
     
+    // Get traffic model multiplier
+    const trafficModelSelect = document.getElementById('traffic-model');
+    let modelMultiplier = 1.0;
+    if (trafficModelSelect) {
+        switch(trafficModelSelect.value) {
+            case 'pessimistic':
+                modelMultiplier = 1.2; // Assume 20% worse traffic
+                break;
+            case 'optimistic':
+                modelMultiplier = 0.9; // Assume 10% better traffic
+                break;
+            default:
+                modelMultiplier = 1.0;
+        }
+    }
+    
     steps.forEach((step, index) => {
         
         const segmentDistance = step.distance.value / 1000; // km
         const segmentDuration = step.duration.value; // seconds
         
         // Estimate speed for this segment (km/h)
-        const avgSpeed = segmentDistance / (segmentDuration / 3600);
+        // Apply traffic model multiplier to simulate different traffic conditions
+        const adjustedDuration = segmentDuration * modelMultiplier;
+        const avgSpeed = segmentDistance / (adjustedDuration / 3600);
         
         // Determine traffic condition based on speed and road type
         let trafficCondition = 'normal';
@@ -462,29 +653,38 @@ function calculateRoute() {
             let trafficDuration = route.duration_in_traffic ? route.duration_in_traffic.value : null;
             let trafficFactor = 1.0;
             
-            // If no traffic data provided, simulate based on traffic model selection
-            if (!trafficDuration) {
-                console.log('No duration_in_traffic provided, simulating based on traffic model');
-                switch(trafficModel.value) {
-                    case 'pessimistic':
-                        trafficFactor = 1.3; // 30% longer travel time
-                        break;
-                    case 'optimistic':
-                        trafficFactor = 0.85; // 15% shorter travel time
-                        break;
-                    default:
-                        trafficFactor = 1.0; // Normal conditions
-                }
-                trafficDuration = normalDuration * trafficFactor;
-            } else {
+            // Calculate base traffic factor from Google Maps data
+            if (trafficDuration) {
                 trafficFactor = trafficDuration / normalDuration;
+            } else {
+                trafficFactor = 1.0; // Default if no traffic data
+                trafficDuration = normalDuration;
             }
+            
+            // Apply traffic model as additional adjustment
+            let modelMultiplier = 1.0;
+            switch(trafficModel.value) {
+                case 'pessimistic':
+                    modelMultiplier = 1.2; // Assume 20% worse traffic than predicted
+                    break;
+                case 'optimistic':
+                    modelMultiplier = 0.9; // Assume 10% better traffic than predicted
+                    break;
+                default: // best_guess
+                    modelMultiplier = 1.0; // Use Google's prediction as-is
+            }
+            
+            // Combine Google's traffic data with user's traffic model
+            trafficFactor = trafficFactor * modelMultiplier;
+            trafficDuration = normalDuration * trafficFactor;
             
             console.log('Traffic calculations:', {
                 normalDuration: normalDuration + 's',
-                trafficDuration: Math.round(trafficDuration) + 's',
-                trafficFactor: trafficFactor,
-                simulated: !route.duration_in_traffic
+                googleTrafficDuration: route.duration_in_traffic ? route.duration_in_traffic.value + 's' : 'Not available',
+                modelMultiplier: modelMultiplier,
+                finalTrafficDuration: Math.round(trafficDuration) + 's',
+                finalTrafficFactor: trafficFactor,
+                trafficModel: trafficModel.value
             });
             
             // Calculate total energy consumption from segments
@@ -588,6 +788,22 @@ function calculateRoute() {
                                 </tfoot>
                             </table>
                         </div>
+                        
+                        <!-- Charts Section -->
+                        <div class="mt-6 grid md:grid-cols-2 gap-4">
+                            <div class="bg-white rounded-lg p-4 shadow-sm">
+                                <h4 class="text-sm font-semibold mb-2">📈 SOC Over Distance</h4>
+                                <div style="position: relative; height: 200px;">
+                                    <canvas id="soc-chart"></canvas>
+                                </div>
+                            </div>
+                            <div class="bg-white rounded-lg p-4 shadow-sm">
+                                <h4 class="text-sm font-semibold mb-2">⚡ Efficiency by Segment</h4>
+                                <div style="position: relative; height: 200px;">
+                                    <canvas id="efficiency-chart"></canvas>
+                                </div>
+                            </div>
+                        </div>
                     </div>
                 `;
             }
@@ -629,7 +845,8 @@ function calculateRoute() {
                         '<p class="text-sm text-gray-600 mt-2">Light traffic detected. Energy consumption adjusted for higher speeds.</p>' :
                         '<p class="text-sm text-gray-600 mt-2">Normal traffic conditions - standard energy consumption.</p>'
                     }
-                    ${!route.duration_in_traffic ? '<p class="text-xs text-gray-500 mt-1">⚠️ Traffic data unavailable - using traffic model simulation</p>' : ''}
+                    ${!route.duration_in_traffic ? '<p class="text-xs text-gray-500 mt-1">⚠️ Traffic data unavailable - using base estimates</p>' : ''}
+                    ${modelMultiplier !== 1.0 ? `<p class="text-xs text-gray-500 mt-1">📊 Traffic model applied: ${trafficModel.value === 'pessimistic' ? 'Heavy (+20%)' : 'Light (-10%)'}</p>` : ''}
                 </div>
                 
                 <div class="mt-4 pt-4 border-t border-gray-200">
@@ -641,6 +858,11 @@ function calculateRoute() {
                 
                 ${segmentsHTML}
             `;
+            
+            // Draw charts if segments are available
+            if (segments.length > 0) {
+                drawSegmentCharts(segments, startSocValue, batteryCapacityValue);
+            }
         } else {
             console.error('Directions API Error:', status);
             if (status === 'REQUEST_DENIED') {
