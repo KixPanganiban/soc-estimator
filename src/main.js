@@ -267,9 +267,9 @@ function calculateRoute() {
                         <span class="text-sm text-gray-600">Traffic Factor: ${trafficFactor.toFixed(2)}x</span>
                     </div>
                     ${trafficFactor > 1.1 ? 
-                        '<p class="text-sm text-green-600 mt-2">✅ Good news! Heavy traffic improves EV efficiency through regenerative braking.</p>' : 
+                        '<p class="text-sm text-gray-600 mt-2">Traffic conditions detected. Energy consumption adjusted based on stop-and-go patterns.</p>' : 
                         trafficFactor < 0.9 ? 
-                        '<p class="text-sm text-yellow-600 mt-2">⚡ Light traffic means higher speeds, which increases energy consumption.</p>' :
+                        '<p class="text-sm text-gray-600 mt-2">Light traffic detected. Energy consumption adjusted for higher speeds.</p>' :
                         '<p class="text-sm text-gray-600 mt-2">Normal traffic conditions - standard energy consumption.</p>'
                     }
                 </div>
