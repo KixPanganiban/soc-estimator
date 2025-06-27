@@ -126,6 +126,59 @@ window.initMap = function() {
     }
 }
 
+// Analyze route segments and calculate traffic for each
+function analyzeRouteSegments(route, avgMileageKwh, batteryCapacityKwh) {
+    const segments = [];
+    const steps = route.steps || [];
+    
+    steps.forEach((step, index) => {
+        const segmentDistance = step.distance.value / 1000; // km
+        const segmentDuration = step.duration.value; // seconds
+        
+        // Estimate speed for this segment (km/h)
+        const avgSpeed = segmentDistance / (segmentDuration / 3600);
+        
+        // Determine traffic condition based on speed and road type
+        let trafficCondition = 'normal';
+        let trafficFactor = 1.0;
+        let consumptionMultiplier = 1.0;
+        
+        // Analyze based on average speed
+        if (avgSpeed < 20) {
+            trafficCondition = 'heavy';
+            trafficFactor = 1.5;
+            consumptionMultiplier = 0.8; // More efficient in stop-and-go
+        } else if (avgSpeed < 40) {
+            trafficCondition = 'moderate';
+            trafficFactor = 1.2;
+            consumptionMultiplier = 0.9;
+        } else if (avgSpeed > 80) {
+            trafficCondition = 'light';
+            trafficFactor = 0.8;
+            consumptionMultiplier = 1.2; // Less efficient at high speeds
+        }
+        
+        // Calculate energy consumption for this segment
+        const baseConsumption = (segmentDistance / 100) * avgMileageKwh;
+        const adjustedConsumption = baseConsumption * consumptionMultiplier;
+        
+        segments.push({
+            index: index,
+            instruction: step.html_instructions,
+            distance: segmentDistance,
+            duration: segmentDuration,
+            avgSpeed: avgSpeed,
+            trafficCondition: trafficCondition,
+            trafficFactor: trafficFactor,
+            baseConsumption: baseConsumption,
+            adjustedConsumption: adjustedConsumption,
+            consumptionMultiplier: consumptionMultiplier
+        });
+    });
+    
+    return segments;
+}
+
 function calculateRoute() {
     // Validate inputs
     if (startPoint.value === '' || destination.value === '') {
@@ -207,12 +260,16 @@ function calculateRoute() {
             const distance = route.distance.value / 1000; // in km
             const travelTime = route.duration.text;
             
+            // Process route segments (steps)
+            const segments = analyzeRouteSegments(route, avgMileageValue, batteryCapacityValue);
+            
             // Log the route data to debug
             console.log('Route data:', {
                 duration: route.duration,
                 duration_in_traffic: route.duration_in_traffic,
                 departure_time: route.departure_time,
-                arrival_time: route.arrival_time
+                arrival_time: route.arrival_time,
+                segments: segments
             });
             
             // Get traffic data
@@ -245,14 +302,13 @@ function calculateRoute() {
                 simulated: !route.duration_in_traffic
             });
             
-            // Calculate base energy consumption
-            const baseEnergyConsumed = (distance / 100) * avgMileageValue;
+            // Calculate total energy consumption from segments
+            const totalSegmentBase = segments.reduce((sum, seg) => sum + seg.baseConsumption, 0);
+            const totalSegmentAdjusted = segments.reduce((sum, seg) => sum + seg.adjustedConsumption, 0);
             
-            // Adjust for traffic - EVs are MORE efficient in heavy traffic (stop-and-go)
-            // and LESS efficient at highway speeds (light traffic)
-            // Traffic factor > 1 means heavy traffic, < 1 means light traffic
-            const trafficAdjustment = 2 - trafficFactor; // Inverts the relationship
-            const adjustedEnergyConsumed = baseEnergyConsumed * trafficAdjustment;
+            // Use segment-based calculations if available, otherwise fall back to route-level
+            const baseEnergyConsumed = segments.length > 0 ? totalSegmentBase : (distance / 100) * avgMileageValue;
+            const adjustedEnergyConsumed = segments.length > 0 ? totalSegmentAdjusted : baseEnergyConsumed * (2 - trafficFactor);
             
             // Calculate battery consumption
             const socConsumed = (adjustedEnergyConsumed / batteryCapacityValue) * 100;
@@ -285,6 +341,60 @@ function calculateRoute() {
                 trafficIcon = '🏎️';
             }
 
+            // Generate segments HTML if available
+            let segmentsHTML = '';
+            if (segments.length > 0) {
+                segmentsHTML = `
+                    <div class="mt-6">
+                        <h3 class="text-md font-semibold mb-3">Route Segments Analysis</h3>
+                        <div class="max-h-64 overflow-y-auto">
+                            <table class="w-full text-sm">
+                                <thead class="bg-gray-50 sticky top-0">
+                                    <tr>
+                                        <th class="px-2 py-1 text-left">#</th>
+                                        <th class="px-2 py-1 text-left">Segment</th>
+                                        <th class="px-2 py-1 text-right">Distance</th>
+                                        <th class="px-2 py-1 text-center">Traffic</th>
+                                        <th class="px-2 py-1 text-right">Energy</th>
+                                    </tr>
+                                </thead>
+                                <tbody class="divide-y divide-gray-200">
+                                    ${segments.map((seg, idx) => {
+                                        const trafficColor = seg.trafficCondition === 'heavy' ? 'text-green-600' : 
+                                                           seg.trafficCondition === 'light' ? 'text-yellow-600' : 'text-gray-600';
+                                        const trafficIcon = seg.trafficCondition === 'heavy' ? '🚦' : 
+                                                          seg.trafficCondition === 'light' ? '🏎️' : '🚗';
+                                        return `
+                                            <tr class="hover:bg-gray-50">
+                                                <td class="px-2 py-1">${idx + 1}</td>
+                                                <td class="px-2 py-1">
+                                                    <div class="truncate max-w-xs" title="${seg.instruction.replace(/<[^>]*>/g, '')}">
+                                                        ${seg.instruction.replace(/<[^>]*>/g, '').substring(0, 40)}...
+                                                    </div>
+                                                </td>
+                                                <td class="px-2 py-1 text-right">${seg.distance.toFixed(1)} km</td>
+                                                <td class="px-2 py-1 text-center">
+                                                    <span class="${trafficColor}">${trafficIcon} ${seg.avgSpeed.toFixed(0)} km/h</span>
+                                                </td>
+                                                <td class="px-2 py-1 text-right">${seg.adjustedConsumption.toFixed(2)} kWh</td>
+                                            </tr>
+                                        `;
+                                    }).join('')}
+                                </tbody>
+                                <tfoot class="bg-gray-100 font-semibold">
+                                    <tr>
+                                        <td colspan="2" class="px-2 py-1">Total</td>
+                                        <td class="px-2 py-1 text-right">${distance.toFixed(1)} km</td>
+                                        <td class="px-2 py-1"></td>
+                                        <td class="px-2 py-1 text-right">${adjustedEnergyConsumed.toFixed(1)} kWh</td>
+                                    </tr>
+                                </tfoot>
+                            </table>
+                        </div>
+                    </div>
+                `;
+            }
+            
             resultsDiv.innerHTML = `
                 <h2 class="text-lg font-semibold mb-4">Trip Results</h2>
                 <div class="grid grid-cols-2 gap-4">
@@ -331,6 +441,8 @@ function calculateRoute() {
                     <p class="text-sm text-gray-500">SOC Used: ${socConsumed.toFixed(1)}%</p>
                     ${estimatedSocLeft < 20 ? '<p class="text-sm text-red-600 mt-2">⚠️ Low battery warning! Consider charging during your trip.</p>' : ''}
                 </div>
+                
+                ${segmentsHTML}
             `;
         } else {
             console.error('Directions API Error:', status);

@@ -104,6 +104,36 @@ If you see this error, it means the Directions API is not enabled for your Googl
 - Make sure your API key has no restrictions, or if it does, ensure `localhost:5173` is in the allowed referrers
 - Verify all three required APIs are enabled in the Google Cloud Console
 
+## Contributing
+
+### Adding New Vehicle Models
+
+The app includes a database of popular EVs in Southeast Asia. To add a new vehicle:
+
+1. Open `vehicles.csv` in the project root
+2. Add a new line with the following columns (separated by commas):
+   - `brand` - Vehicle manufacturer (e.g., "Tesla", "BYD")
+   - `model` - Vehicle model name (e.g., "Model 3", "Atto 3")
+   - `variant` - Specific variant/trim (e.g., "Standard Range", "Long Range")
+   - `battery_capacity_kwh` - Battery capacity in kWh (e.g., "60.0")
+   - `consumption_kwh_100km` - Average energy consumption per 100km (e.g., "15.5")
+   - `year` - Model year (e.g., "2024")
+   - `availability` - Countries where available, in quotes (e.g., "Thailand,Malaysia,Singapore")
+
+Example entry:
+```csv
+Tesla,Model Y,Performance,75.0,17.5,2024,"Singapore,Thailand,Malaysia"
+```
+
+3. Save the file and test the vehicle selector in the app
+4. Submit a pull request with your additions
+
+**Tips for accurate data:**
+- Check manufacturer specifications for battery capacity
+- Use real-world consumption data when available (WLTP/EPA ratings tend to be optimistic)
+- Include multiple variants if they have different battery sizes
+- Use quotes around the availability field if it contains commas
+
 ## Technology Stack
 
 - **Bun** - JavaScript runtime and package manager
