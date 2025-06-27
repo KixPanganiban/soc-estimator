@@ -4,6 +4,7 @@ const apiKeySubmit = document.getElementById('api-key-submit');
 const mainContent = document.getElementById('main-content');
 const changeApiKeyBtn = document.getElementById('change-api-key');
 
+const vehicleSelect = document.getElementById('vehicle-select');
 const startSoc = document.getElementById('start-soc');
 const batteryCapacity = document.getElementById('battery-capacity');
 const avgMileage = document.getElementById('avg-mileage');
@@ -356,13 +357,14 @@ function showError(message) {
 }
 
 // Schema version for input storage (increment when changing input structure)
-const SCHEMA_VERSION = '1.0';
+const SCHEMA_VERSION = '1.1'; // Incremented for vehicle selection
 const STORAGE_KEY = 'evSocEstimatorInputs';
 
 // Save inputs to localStorage
 function saveInputs() {
     const inputs = {
         version: SCHEMA_VERSION,
+        vehicleSelect: vehicleSelect.value,
         startSoc: startSoc.value,
         batteryCapacity: batteryCapacity.value,
         avgMileage: avgMileage.value,
@@ -390,6 +392,7 @@ function loadInputs() {
         }
         
         // Restore values
+        if (inputs.vehicleSelect) vehicleSelect.value = inputs.vehicleSelect;
         if (inputs.startSoc) startSoc.value = inputs.startSoc;
         if (inputs.batteryCapacity) batteryCapacity.value = inputs.batteryCapacity;
         if (inputs.avgMileage) avgMileage.value = inputs.avgMileage;
@@ -407,7 +410,7 @@ function loadInputs() {
 
 // Add input listeners to save on change
 function setupInputPersistence() {
-    const inputs = [startSoc, batteryCapacity, avgMileage, departureTime, trafficModel, startPoint, destination];
+    const inputs = [vehicleSelect, startSoc, batteryCapacity, avgMileage, departureTime, trafficModel, startPoint, destination];
     
     inputs.forEach(input => {
         input.addEventListener('change', saveInputs);
@@ -418,5 +421,105 @@ function setupInputPersistence() {
     });
 }
 
+// Vehicle data management
+let vehicleData = [];
+
+// Load vehicle data from CSV
+async function loadVehicleData() {
+    try {
+        const response = await fetch('./vehicles.csv');
+        const csvText = await response.text();
+        
+        // Parse CSV
+        const lines = csvText.trim().split('\n');
+        const headers = lines[0].split(',');
+        
+        vehicleData = lines.slice(1).map(line => {
+            const values = line.split(',');
+            const vehicle = {};
+            headers.forEach((header, index) => {
+                vehicle[header] = values[index];
+            });
+            return vehicle;
+        });
+        
+        // Sort by brand and model
+        vehicleData.sort((a, b) => {
+            const brandCompare = a.brand.localeCompare(b.brand);
+            if (brandCompare !== 0) return brandCompare;
+            return a.model.localeCompare(b.model);
+        });
+        
+        populateVehicleSelect();
+        console.log(`Loaded ${vehicleData.length} vehicle models`);
+        
+        // After vehicle data is loaded, restore saved inputs if in main content
+        if (!mainContent.classList.contains('hidden')) {
+            loadInputs();
+        }
+    } catch (error) {
+        console.error('Error loading vehicle data:', error);
+    }
+}
+
+// Populate vehicle select dropdown
+function populateVehicleSelect() {
+    // Clear existing options except the first one
+    vehicleSelect.innerHTML = '<option value="">Select a vehicle model...</option>';
+    
+    // Group by brand
+    const brands = {};
+    vehicleData.forEach(vehicle => {
+        if (!brands[vehicle.brand]) {
+            brands[vehicle.brand] = [];
+        }
+        brands[vehicle.brand].push(vehicle);
+    });
+    
+    // Create optgroups for each brand
+    Object.keys(brands).sort().forEach(brand => {
+        const optgroup = document.createElement('optgroup');
+        optgroup.label = brand;
+        
+        brands[brand].forEach((vehicle, index) => {
+            const option = document.createElement('option');
+            option.value = `${brand}-${index}`;
+            option.textContent = `${vehicle.model} ${vehicle.variant}`;
+            option.dataset.battery = vehicle.battery_capacity_kwh;
+            option.dataset.consumption = vehicle.consumption_kwh_100km;
+            optgroup.appendChild(option);
+        });
+        
+        vehicleSelect.appendChild(optgroup);
+    });
+}
+
+// Handle vehicle selection
+vehicleSelect.addEventListener('change', (e) => {
+    if (!e.target.value) return;
+    
+    const [brand, index] = e.target.value.split('-');
+    const vehicle = vehicleData.find(v => v.brand === brand);
+    
+    if (vehicle) {
+        // Find the specific variant
+        const brandVehicles = vehicleData.filter(v => v.brand === brand);
+        const selectedVehicle = brandVehicles[parseInt(index)];
+        
+        if (selectedVehicle) {
+            batteryCapacity.value = selectedVehicle.battery_capacity_kwh;
+            avgMileage.value = selectedVehicle.consumption_kwh_100km;
+            
+            // Save the selection
+            saveInputs();
+            
+            console.log(`Selected: ${selectedVehicle.brand} ${selectedVehicle.model} ${selectedVehicle.variant}`);
+        }
+    }
+});
+
 // Check for stored API key when page loads
 checkStoredApiKey();
+
+// Load vehicle data when page loads
+loadVehicleData();
