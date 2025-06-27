@@ -113,6 +113,10 @@ window.initMap = function() {
         });
         
         console.log('Google Maps initialized successfully');
+        
+        // Load saved inputs and set up persistence after map loads
+        loadInputs();
+        setupInputPersistence();
     } catch (error) {
         console.error('Error initializing Google Maps:', error);
         showError('Failed to initialize Google Maps. Please check your API key configuration.');
@@ -153,9 +157,13 @@ function calculateRoute() {
 
     // Calculate departure time
     const now = new Date();
-    let departureTimeValue = now;
+    let departureTimeValue;
     
     switch(departureTime.value) {
+        case 'now':
+            // Set to 1 minute in future to ensure we get traffic data
+            departureTimeValue = new Date(now.getTime() + 60000);
+            break;
         case '15min':
             departureTimeValue = new Date(now.getTime() + 15 * 60000);
             break;
@@ -170,15 +178,23 @@ function calculateRoute() {
             break;
     }
 
+    // Build request with traffic options
     const request = {
         origin: startPoint.value,
         destination: destination.value,
-        travelMode: 'DRIVING',
+        travelMode: google.maps.TravelMode.DRIVING,
         drivingOptions: {
-            departureTime: departureTimeValue,
-            trafficModel: trafficModel.value
+            departureTime: departureTimeValue
         }
     };
+    
+    // Try to add traffic model if requested
+    if (trafficModel.value && trafficModel.value !== 'best_guess') {
+        // Use the string values directly as the API seems to accept them
+        request.drivingOptions.trafficModel = trafficModel.value;
+    }
+    
+    console.log('Directions request:', request);
 
     directionsService.route(request, (result, status) => {
         estimateBtn.disabled = false;
@@ -190,10 +206,43 @@ function calculateRoute() {
             const distance = route.distance.value / 1000; // in km
             const travelTime = route.duration.text;
             
+            // Log the route data to debug
+            console.log('Route data:', {
+                duration: route.duration,
+                duration_in_traffic: route.duration_in_traffic,
+                departure_time: route.departure_time,
+                arrival_time: route.arrival_time
+            });
+            
             // Get traffic data
             const normalDuration = route.duration.value; // in seconds
-            const trafficDuration = route.duration_in_traffic ? route.duration_in_traffic.value : normalDuration;
-            const trafficFactor = trafficDuration / normalDuration;
+            let trafficDuration = route.duration_in_traffic ? route.duration_in_traffic.value : null;
+            let trafficFactor = 1.0;
+            
+            // If no traffic data provided, simulate based on traffic model selection
+            if (!trafficDuration) {
+                console.log('No duration_in_traffic provided, simulating based on traffic model');
+                switch(trafficModel.value) {
+                    case 'pessimistic':
+                        trafficFactor = 1.3; // 30% longer travel time
+                        break;
+                    case 'optimistic':
+                        trafficFactor = 0.85; // 15% shorter travel time
+                        break;
+                    default:
+                        trafficFactor = 1.0; // Normal conditions
+                }
+                trafficDuration = normalDuration * trafficFactor;
+            } else {
+                trafficFactor = trafficDuration / normalDuration;
+            }
+            
+            console.log('Traffic calculations:', {
+                normalDuration: normalDuration + 's',
+                trafficDuration: Math.round(trafficDuration) + 's',
+                trafficFactor: trafficFactor,
+                simulated: !route.duration_in_traffic
+            });
             
             // Calculate base energy consumption
             const baseEnergyConsumed = (distance / 100) * avgMileageValue;
@@ -272,6 +321,7 @@ function calculateRoute() {
                         '<p class="text-sm text-gray-600 mt-2">Light traffic detected. Energy consumption adjusted for higher speeds.</p>' :
                         '<p class="text-sm text-gray-600 mt-2">Normal traffic conditions - standard energy consumption.</p>'
                     }
+                    ${!route.duration_in_traffic ? '<p class="text-xs text-gray-500 mt-1">⚠️ Traffic data unavailable - using traffic model simulation</p>' : ''}
                 </div>
                 
                 <div class="mt-4 pt-4 border-t border-gray-200">
@@ -303,6 +353,69 @@ function calculateRoute() {
 
 function showError(message) {
     resultsDiv.innerHTML = `<p class="text-red-600">${message}</p>`;
+}
+
+// Schema version for input storage (increment when changing input structure)
+const SCHEMA_VERSION = '1.0';
+const STORAGE_KEY = 'evSocEstimatorInputs';
+
+// Save inputs to localStorage
+function saveInputs() {
+    const inputs = {
+        version: SCHEMA_VERSION,
+        startSoc: startSoc.value,
+        batteryCapacity: batteryCapacity.value,
+        avgMileage: avgMileage.value,
+        departureTime: departureTime.value,
+        trafficModel: trafficModel.value,
+        startPoint: startPoint.value,
+        destination: destination.value
+    };
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(inputs));
+}
+
+// Load inputs from localStorage
+function loadInputs() {
+    try {
+        const stored = localStorage.getItem(STORAGE_KEY);
+        if (!stored) return;
+        
+        const inputs = JSON.parse(stored);
+        
+        // Check schema version
+        if (inputs.version !== SCHEMA_VERSION) {
+            console.log('Schema version mismatch, clearing stored inputs');
+            localStorage.removeItem(STORAGE_KEY);
+            return;
+        }
+        
+        // Restore values
+        if (inputs.startSoc) startSoc.value = inputs.startSoc;
+        if (inputs.batteryCapacity) batteryCapacity.value = inputs.batteryCapacity;
+        if (inputs.avgMileage) avgMileage.value = inputs.avgMileage;
+        if (inputs.departureTime) departureTime.value = inputs.departureTime;
+        if (inputs.trafficModel) trafficModel.value = inputs.trafficModel;
+        if (inputs.startPoint) startPoint.value = inputs.startPoint;
+        if (inputs.destination) destination.value = inputs.destination;
+        
+        console.log('Inputs restored from localStorage');
+    } catch (error) {
+        console.error('Error loading saved inputs:', error);
+        localStorage.removeItem(STORAGE_KEY);
+    }
+}
+
+// Add input listeners to save on change
+function setupInputPersistence() {
+    const inputs = [startSoc, batteryCapacity, avgMileage, departureTime, trafficModel, startPoint, destination];
+    
+    inputs.forEach(input => {
+        input.addEventListener('change', saveInputs);
+        // For text inputs, also save on blur
+        if (input.type === 'text') {
+            input.addEventListener('blur', saveInputs);
+        }
+    });
 }
 
 // Check for stored API key when page loads
