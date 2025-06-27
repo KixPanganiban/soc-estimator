@@ -7,6 +7,8 @@ const changeApiKeyBtn = document.getElementById('change-api-key');
 const startSoc = document.getElementById('start-soc');
 const batteryCapacity = document.getElementById('battery-capacity');
 const avgMileage = document.getElementById('avg-mileage');
+const departureTime = document.getElementById('departure-time');
+const trafficModel = document.getElementById('traffic-model');
 const startPoint = document.getElementById('start-point');
 const destination = document.getElementById('destination');
 const estimateBtn = document.getElementById('estimate-btn');
@@ -146,13 +148,36 @@ function calculateRoute() {
     }
 
     // Show loading state
-    resultsDiv.innerHTML = '<p class="text-gray-600">Calculating route...</p>';
+    resultsDiv.innerHTML = '<p class="text-gray-600">Calculating route with traffic data...</p>';
     estimateBtn.disabled = true;
+
+    // Calculate departure time
+    const now = new Date();
+    let departureTimeValue = now;
+    
+    switch(departureTime.value) {
+        case '15min':
+            departureTimeValue = new Date(now.getTime() + 15 * 60000);
+            break;
+        case '30min':
+            departureTimeValue = new Date(now.getTime() + 30 * 60000);
+            break;
+        case '1hour':
+            departureTimeValue = new Date(now.getTime() + 60 * 60000);
+            break;
+        case '2hours':
+            departureTimeValue = new Date(now.getTime() + 120 * 60000);
+            break;
+    }
 
     const request = {
         origin: startPoint.value,
         destination: destination.value,
         travelMode: 'DRIVING',
+        drivingOptions: {
+            departureTime: departureTimeValue,
+            trafficModel: trafficModel.value
+        }
     };
 
     directionsService.route(request, (result, status) => {
@@ -164,10 +189,27 @@ function calculateRoute() {
             const route = result.routes[0].legs[0];
             const distance = route.distance.value / 1000; // in km
             const travelTime = route.duration.text;
-
-            const energyConsumed = (distance / 100) * avgMileageValue;
-            const socConsumed = (energyConsumed / batteryCapacityValue) * 100;
+            
+            // Get traffic data
+            const normalDuration = route.duration.value; // in seconds
+            const trafficDuration = route.duration_in_traffic ? route.duration_in_traffic.value : normalDuration;
+            const trafficFactor = trafficDuration / normalDuration;
+            
+            // Calculate base energy consumption
+            const baseEnergyConsumed = (distance / 100) * avgMileageValue;
+            
+            // Adjust for traffic - EVs are MORE efficient in heavy traffic (stop-and-go)
+            // and LESS efficient at highway speeds (light traffic)
+            // Traffic factor > 1 means heavy traffic, < 1 means light traffic
+            const trafficAdjustment = 2 - trafficFactor; // Inverts the relationship
+            const adjustedEnergyConsumed = baseEnergyConsumed * trafficAdjustment;
+            
+            // Calculate battery consumption
+            const socConsumed = (adjustedEnergyConsumed / batteryCapacityValue) * 100;
             const estimatedSocLeft = startSocValue - socConsumed;
+            
+            // Calculate efficiency impact
+            const efficiencyChange = ((baseEnergyConsumed - adjustedEnergyConsumed) / baseEnergyConsumed) * 100;
 
             // Color code the result based on remaining SOC
             let socColor = 'text-green-600';
@@ -175,6 +217,22 @@ function calculateRoute() {
                 socColor = 'text-red-600';
             } else if (estimatedSocLeft < 40) {
                 socColor = 'text-yellow-600';
+            }
+
+            // Determine traffic status and color
+            let trafficStatus, trafficColor, trafficIcon;
+            if (trafficFactor > 1.2) {
+                trafficStatus = 'Heavy Traffic';
+                trafficColor = 'text-green-600';
+                trafficIcon = '🚦';
+            } else if (trafficFactor > 0.9) {
+                trafficStatus = 'Normal Traffic';
+                trafficColor = 'text-gray-600';
+                trafficIcon = '🚗';
+            } else {
+                trafficStatus = 'Light Traffic';
+                trafficColor = 'text-yellow-600';
+                trafficIcon = '🏎️';
             }
 
             resultsDiv.innerHTML = `
@@ -187,19 +245,39 @@ function calculateRoute() {
                     <div>
                         <p class="text-sm text-gray-600">Travel Time</p>
                         <p class="font-semibold">${travelTime}</p>
+                        ${trafficDuration !== normalDuration ? `<p class="text-xs text-gray-500">(${Math.round(normalDuration/60)} min without traffic)</p>` : ''}
                     </div>
                     <div>
-                        <p class="text-sm text-gray-600">Energy Consumed</p>
-                        <p class="font-semibold">${energyConsumed.toFixed(1)} kWh</p>
+                        <p class="text-sm text-gray-600">Base Energy Consumption</p>
+                        <p class="font-semibold">${baseEnergyConsumed.toFixed(1)} kWh</p>
                     </div>
                     <div>
-                        <p class="text-sm text-gray-600">SOC Consumed</p>
-                        <p class="font-semibold">${socConsumed.toFixed(1)}%</p>
+                        <p class="text-sm text-gray-600">Adjusted for Traffic</p>
+                        <p class="font-semibold">${adjustedEnergyConsumed.toFixed(1)} kWh</p>
+                        <p class="text-xs ${efficiencyChange > 0 ? 'text-green-600' : 'text-red-600'}">${efficiencyChange > 0 ? '↓' : '↑'} ${Math.abs(efficiencyChange).toFixed(0)}%</p>
                     </div>
                 </div>
+                
+                <div class="mt-4 p-3 bg-gray-50 rounded-lg">
+                    <div class="flex items-center justify-between">
+                        <div class="flex items-center gap-2">
+                            <span class="text-lg">${trafficIcon}</span>
+                            <span class="font-medium ${trafficColor}">${trafficStatus}</span>
+                        </div>
+                        <span class="text-sm text-gray-600">Traffic Factor: ${trafficFactor.toFixed(2)}x</span>
+                    </div>
+                    ${trafficFactor > 1.1 ? 
+                        '<p class="text-sm text-green-600 mt-2">✅ Good news! Heavy traffic improves EV efficiency through regenerative braking.</p>' : 
+                        trafficFactor < 0.9 ? 
+                        '<p class="text-sm text-yellow-600 mt-2">⚡ Light traffic means higher speeds, which increases energy consumption.</p>' :
+                        '<p class="text-sm text-gray-600 mt-2">Normal traffic conditions - standard energy consumption.</p>'
+                    }
+                </div>
+                
                 <div class="mt-4 pt-4 border-t border-gray-200">
                     <p class="text-sm text-gray-600">Estimated State-of-Charge Left</p>
                     <p class="text-2xl font-bold ${socColor}">${estimatedSocLeft.toFixed(1)}%</p>
+                    <p class="text-sm text-gray-500">SOC Used: ${socConsumed.toFixed(1)}%</p>
                     ${estimatedSocLeft < 20 ? '<p class="text-sm text-red-600 mt-2">⚠️ Low battery warning! Consider charging during your trip.</p>' : ''}
                 </div>
             `;

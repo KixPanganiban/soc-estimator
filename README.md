@@ -5,12 +5,14 @@ A web application to calculate the remaining battery state-of-charge (SOC) for e
 ## Features
 
 - Calculate remaining battery percentage based on trip distance
+- **Traffic-aware energy consumption** - adjusts estimates based on real-time traffic data
 - Interactive Google Maps integration with route visualization
 - Input validation and error handling
 - Color-coded results based on remaining charge
 - Low battery warnings
 - Responsive design for mobile and desktop
 - Secure API key management (stored locally in browser)
+- Educational insights about EV efficiency in different traffic conditions
 
 ## Setup
 
@@ -78,10 +80,20 @@ bun run preview
 
 The app will display:
 - Trip distance
-- Travel time
-- Energy consumed
+- Travel time (with and without traffic)
+- Base energy consumption
+- Traffic-adjusted energy consumption
 - Battery percentage used
 - Estimated remaining state-of-charge
+- Traffic conditions and their impact on efficiency
+
+### How Traffic Affects EV Efficiency
+
+Unlike conventional gas vehicles, electric vehicles are:
+- **MORE efficient in heavy traffic** - Regenerative braking recovers energy during stop-and-go driving
+- **LESS efficient at highway speeds** - Aerodynamic drag increases energy consumption
+
+The app automatically adjusts energy consumption estimates based on real-time traffic data from Google Maps.
 
 ## Troubleshooting
 
