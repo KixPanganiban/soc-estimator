@@ -15,6 +15,9 @@ const destination = document.getElementById('destination');
 const estimateBtn = document.getElementById('estimate-btn');
 const mapDiv = document.getElementById('map');
 const resultsDiv = document.getElementById('results');
+const howCalculateBtn = document.getElementById('how-calculate-btn');
+const howCalculateModal = document.getElementById('how-calculate-modal');
+const closeModalBtn = document.getElementById('close-modal-btn');
 
 let map;
 let directionsService;
@@ -821,6 +824,22 @@ vehicleSelect.addEventListener('change', (e) => {
             
             console.log(`Selected: ${selectedVehicle.brand} ${selectedVehicle.model} ${selectedVehicle.variant}`);
         }
+    }
+});
+
+// Modal event listeners
+howCalculateBtn.addEventListener('click', () => {
+    howCalculateModal.classList.remove('hidden');
+});
+
+closeModalBtn.addEventListener('click', () => {
+    howCalculateModal.classList.add('hidden');
+});
+
+// Close modal when clicking outside
+howCalculateModal.addEventListener('click', (e) => {
+    if (e.target === howCalculateModal) {
+        howCalculateModal.classList.add('hidden');
     }
 });
 
