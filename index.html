@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EV State-of-Charge Estimator</title>
+    <link href="./src/styles.css" rel="stylesheet">
+</head>
+<body class="bg-gray-100">
+    <div class="container mx-auto p-4 max-w-7xl">
+        <h1 class="text-3xl font-bold mb-2">EV State-of-Charge Estimator</h1>
+        <p class="text-gray-600 mb-6">Calculate your electric vehicle's remaining battery after a trip</p>
+        
+        <!-- API Key Section -->
+        <div id="api-key-section" class="bg-yellow-50 border border-yellow-200 p-4 rounded-lg mb-6">
+            <h2 class="text-lg font-semibold mb-2">Google Maps API Key Required</h2>
+            <p class="text-sm text-gray-700 mb-3">Enter your Google Maps API key to use this application. <a href="https://console.cloud.google.com" target="_blank" class="text-blue-600 underline">Get an API key</a></p>
+            <div class="flex gap-2">
+                <input type="password" id="api-key-input" class="flex-1 rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500" placeholder="Enter your Google Maps API key">
+                <button id="api-key-submit" class="bg-indigo-600 text-white py-2 px-4 rounded-md hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">Load Map</button>
+            </div>
+            <p class="text-xs text-gray-600 mt-2">Required APIs: Maps JavaScript API, Places API, Directions API</p>
+        </div>
+        
+        <div id="main-content" class="hidden">
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div class="md:col-span-1 bg-white p-4 rounded-lg shadow-md">
+                    <div class="flex justify-between items-center mb-4">
+                        <h2 class="text-lg font-semibold">Inputs</h2>
+                        <button id="change-api-key" class="text-xs text-gray-600 hover:text-gray-800 underline">Change API Key</button>
+                    </div>
+                <div class="mb-4">
+                    <label for="start-soc" class="block text-sm font-medium text-gray-700">Starting State-of-Charge (%)</label>
+                    <input type="number" id="start-soc" class="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500" value="80" min="0" max="100" step="1">
+                </div>
+                <div class="mb-4">
+                    <label for="battery-capacity" class="block text-sm font-medium text-gray-700">Total Battery Capacity (kWh)</label>
+                    <input type="number" id="battery-capacity" class="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500" value="75" min="1" step="0.1">
+                </div>
+                <div class="mb-4">
+                    <label for="avg-mileage" class="block text-sm font-medium text-gray-700">Average Mileage (kWh/100km)</label>
+                    <input type="number" id="avg-mileage" class="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500" value="18" min="1" step="0.1">
+                </div>
+                <div class="mb-4">
+                    <label for="start-point" class="block text-sm font-medium text-gray-700">Starting Point</label>
+                    <input type="text" id="start-point" class="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500" placeholder="Enter starting location">
+                </div>
+                <div class="mb-4">
+                    <label for="destination" class="block text-sm font-medium text-gray-700">Destination</label>
+                    <input type="text" id="destination" class="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500" placeholder="Enter destination">
+                </div>
+                <button id="estimate-btn" class="w-full bg-indigo-600 text-white py-2 px-4 rounded-md hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">Estimate</button>
+            </div>
+            <div class="md:col-span-2">
+                <div id="map" class="h-96 rounded-lg shadow-md mb-4"></div>
+                <div id="results" class="bg-white p-4 rounded-lg shadow-md min-h-[100px]">
+                    <p class="text-gray-500 text-center">Enter your trip details and click "Estimate" to see results</p>
+                </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <script type="module" src="./src/main.js"></script>
+</body>
+</html>
