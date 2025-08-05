@@ -68,6 +68,16 @@
                     <input type="text" id="start-point" class="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500" placeholder="Enter starting location">
                 </div>
                 <div class="mb-4">
+                    <div class="flex justify-between items-center mb-2">
+                        <label class="block text-sm font-medium text-gray-700">Waypoints</label>
+                        <button id="add-waypoint-btn" class="text-sm text-indigo-600 hover:text-indigo-700 focus:outline-none">+ Add waypoint</button>
+                    </div>
+                    <div id="waypoints-container" class="space-y-2">
+                        <!-- Waypoints will be dynamically added here -->
+                    </div>
+                    <p class="mt-1 text-xs text-gray-500">Optional stops along your route</p>
+                </div>
+                <div class="mb-4">
                     <label for="destination" class="block text-sm font-medium text-gray-700">Destination</label>
                     <input type="text" id="destination" class="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500" placeholder="Enter destination">
                 </div>

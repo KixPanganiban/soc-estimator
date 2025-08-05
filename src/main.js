@@ -18,12 +18,16 @@ const resultsDiv = document.getElementById('results');
 const howCalculateBtn = document.getElementById('how-calculate-btn');
 const howCalculateModal = document.getElementById('how-calculate-modal');
 const closeModalBtn = document.getElementById('close-modal-btn');
+const addWaypointBtn = document.getElementById('add-waypoint-btn');
+const waypointsContainer = document.getElementById('waypoints-container');
 
 let map;
 let directionsService;
 let directionsRenderer;
 let userApiKey = '';
 let segmentPolylines = [];
+let waypoints = [];
+let waypointAutocompletes = [];
 
 // Check if API key is stored in localStorage
 function checkStoredApiKey() {
@@ -110,6 +114,7 @@ window.initMap = function() {
         const destinationAutocomplete = new google.maps.places.Autocomplete(destination);
 
         estimateBtn.addEventListener('click', calculateRoute);
+        addWaypointBtn.addEventListener('click', addWaypoint);
         
         // Add enter key support
         [startPoint, destination].forEach(input => {
@@ -203,6 +208,105 @@ function updateDepartureTimeOptions() {
     if (currentValue && currentValue !== 'now' && currentValue.includes('T')) {
         departureTimeSelect.value = currentValue;
     }
+}
+
+// Add a new waypoint input
+function addWaypoint() {
+    const waypointIndex = waypoints.length;
+    const waypointDiv = document.createElement('div');
+    waypointDiv.className = 'flex gap-2 waypoint-item';
+    waypointDiv.dataset.index = waypointIndex;
+    
+    const waypointInput = document.createElement('input');
+    waypointInput.type = 'text';
+    waypointInput.className = 'flex-1 rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500';
+    waypointInput.placeholder = `Waypoint ${waypointIndex + 1}`;
+    waypointInput.id = `waypoint-${waypointIndex}`;
+    
+    const removeBtn = document.createElement('button');
+    removeBtn.className = 'text-red-600 hover:text-red-700 px-2';
+    removeBtn.innerHTML = '✕';
+    removeBtn.onclick = () => removeWaypoint(waypointIndex);
+    
+    waypointDiv.appendChild(waypointInput);
+    waypointDiv.appendChild(removeBtn);
+    waypointsContainer.appendChild(waypointDiv);
+    
+    // Add to waypoints array
+    waypoints.push({ element: waypointInput, value: '' });
+    
+    // Initialize Google Places autocomplete for the new waypoint
+    if (typeof google !== 'undefined' && google.maps && google.maps.places) {
+        const autocomplete = new google.maps.places.Autocomplete(waypointInput);
+        waypointAutocompletes.push(autocomplete);
+        
+        // Update waypoint value when place is selected
+        waypointInput.addEventListener('change', () => {
+            waypoints[waypointIndex].value = waypointInput.value;
+            saveInputs();
+        });
+        
+        // Also save on blur
+        waypointInput.addEventListener('blur', () => {
+            waypoints[waypointIndex].value = waypointInput.value;
+            saveInputs();
+        });
+        
+        // Add enter key support
+        waypointInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                calculateRoute();
+            }
+        });
+    }
+}
+
+// Format duration from seconds to human-readable text
+function formatDuration(seconds) {
+    const hours = Math.floor(seconds / 3600);
+    const minutes = Math.floor((seconds % 3600) / 60);
+    
+    if (hours > 0) {
+        return `${hours} hr ${minutes} min`;
+    } else {
+        return `${minutes} min`;
+    }
+}
+
+// Remove a waypoint
+function removeWaypoint(index) {
+    // Remove from DOM
+    const waypointDivs = waypointsContainer.querySelectorAll('.waypoint-item');
+    waypointDivs.forEach(div => {
+        if (parseInt(div.dataset.index) === index) {
+            div.remove();
+        }
+    });
+    
+    // Remove from arrays
+    waypoints.splice(index, 1);
+    waypointAutocompletes.splice(index, 1);
+    
+    // Re-index remaining waypoints
+    const remainingDivs = waypointsContainer.querySelectorAll('.waypoint-item');
+    remainingDivs.forEach((div, newIndex) => {
+        div.dataset.index = newIndex;
+        const input = div.querySelector('input');
+        input.placeholder = `Waypoint ${newIndex + 1}`;
+        input.id = `waypoint-${newIndex}`;
+        
+        // Update remove button onclick
+        const removeBtn = div.querySelector('button');
+        removeBtn.onclick = () => removeWaypoint(newIndex);
+    });
+    
+    // Update waypoints array indices
+    waypoints.forEach((waypoint, idx) => {
+        waypoint.index = idx;
+    });
+    
+    // Save the updated waypoints
+    saveInputs();
 }
 
 // Get icon for maneuver type
@@ -609,6 +713,15 @@ function calculateRoute() {
         }
     };
     
+    // Add waypoints if any exist
+    const activeWaypoints = waypoints.filter(wp => wp.value && wp.value.trim() !== '');
+    if (activeWaypoints.length > 0) {
+        request.waypoints = activeWaypoints.map(wp => ({
+            location: wp.value,
+            stopover: true
+        }));
+    }
+    
     // Try to add traffic model if requested
     if (trafficModel.value && trafficModel.value !== 'best_guess') {
         // Use the string values directly as the API seems to accept them
@@ -623,42 +736,71 @@ function calculateRoute() {
         if (status === 'OK') {
             directionsRenderer.setDirections(result);
 
-            const route = result.routes[0].legs[0];
-            const distance = route.distance.value / 1000; // in km
-            const travelTime = route.duration.text;
+            const legs = result.routes[0].legs;
             
-            // Process route segments (steps)
-            let segments = [];
-            try {
-                segments = analyzeRouteSegments(route, avgMileageValue, batteryCapacityValue);
-                if (segments.length > 0) {
-                    drawSegmentsOnMap(segments);
+            // Calculate total distance and time across all legs
+            let totalDistance = 0;
+            let totalTime = 0;
+            let totalTimeText = '';
+            
+            // Process all legs (segments between waypoints)
+            let allSegments = [];
+            
+            legs.forEach((leg, legIndex) => {
+                totalDistance += leg.distance.value / 1000; // in km
+                totalTime += leg.duration.value; // in seconds
+                
+                // Process route segments (steps) for this leg
+                try {
+                    const legSegments = analyzeRouteSegments(leg, avgMileageValue, batteryCapacityValue);
+                    // Add leg index to each segment for identification
+                    legSegments.forEach(segment => {
+                        segment.legIndex = legIndex;
+                        segment.legDescription = legIndex === 0 ? 'Start' : `Waypoint ${legIndex}`;
+                        segment.legDestination = legIndex === legs.length - 1 ? 'Destination' : `Waypoint ${legIndex + 1}`;
+                    });
+                    allSegments = allSegments.concat(legSegments);
+                } catch (error) {
+                    console.error(`Error analyzing route segments for leg ${legIndex}:`, error);
                 }
-            } catch (error) {
-                console.error('Error analyzing route segments:', error);
-                // Continue with route-level analysis if segment analysis fails
+            });
+            
+            const distance = totalDistance;
+            const travelTime = formatDuration(totalTime);
+            
+            // Draw all segments on map
+            if (allSegments.length > 0) {
+                drawSegmentsOnMap(allSegments);
             }
+            
+            let segments = allSegments;
             
             // Log the route data to debug
             console.log('Route data:', {
-                duration: route.duration,
-                duration_in_traffic: route.duration_in_traffic,
-                departure_time: route.departure_time,
-                arrival_time: route.arrival_time,
+                legs: legs.length,
+                totalDistance: distance,
+                totalTime: travelTime,
                 segments: segments
             });
             
-            // Get traffic data
-            const normalDuration = route.duration.value; // in seconds
-            let trafficDuration = route.duration_in_traffic ? route.duration_in_traffic.value : null;
-            let trafficFactor = 1.0;
+            // Get traffic data (aggregate from all legs)
+            let totalNormalDuration = 0;
+            let totalTrafficDuration = 0;
+            let hasTrafficData = false;
             
-            // Calculate base traffic factor from Google Maps data
-            if (trafficDuration) {
-                trafficFactor = trafficDuration / normalDuration;
-            } else {
-                trafficFactor = 1.0; // Default if no traffic data
-                trafficDuration = normalDuration;
+            legs.forEach(leg => {
+                totalNormalDuration += leg.duration.value;
+                if (leg.duration_in_traffic) {
+                    totalTrafficDuration += leg.duration_in_traffic.value;
+                    hasTrafficData = true;
+                } else {
+                    totalTrafficDuration += leg.duration.value;
+                }
+            });
+            
+            let trafficFactor = 1.0;
+            if (hasTrafficData) {
+                trafficFactor = totalTrafficDuration / totalNormalDuration;
             }
             
             // Apply traffic model as additional adjustment
@@ -676,11 +818,11 @@ function calculateRoute() {
             
             // Combine Google's traffic data with user's traffic model
             trafficFactor = trafficFactor * modelMultiplier;
-            trafficDuration = normalDuration * trafficFactor;
+            const trafficDuration = totalNormalDuration * trafficFactor;
             
             console.log('Traffic calculations:', {
-                normalDuration: normalDuration + 's',
-                googleTrafficDuration: route.duration_in_traffic ? route.duration_in_traffic.value + 's' : 'Not available',
+                normalDuration: totalNormalDuration + 's',
+                googleTrafficDuration: hasTrafficData ? totalTrafficDuration + 's' : 'Not available',
                 modelMultiplier: modelMultiplier,
                 finalTrafficDuration: Math.round(trafficDuration) + 's',
                 finalTrafficFactor: trafficFactor,
@@ -808,8 +950,20 @@ function calculateRoute() {
                 `;
             }
             
+            // Build waypoints display if any
+            let waypointsDisplay = '';
+            if (activeWaypoints.length > 0) {
+                waypointsDisplay = `
+                    <div class="mb-3 p-2 bg-blue-50 rounded">
+                        <p class="text-sm font-medium text-blue-900">Route includes ${activeWaypoints.length} waypoint${activeWaypoints.length > 1 ? 's' : ''}</p>
+                        <p class="text-xs text-blue-700">${activeWaypoints.map((wp, i) => `${i + 1}. ${wp.value}`).join(' → ')}</p>
+                    </div>
+                `;
+            }
+
             resultsDiv.innerHTML = `
                 <h2 class="text-lg font-semibold mb-4">Trip Results</h2>
+                ${waypointsDisplay}
                 <div class="grid grid-cols-2 gap-4">
                     <div>
                         <p class="text-sm text-gray-600">Distance</p>
@@ -818,7 +972,7 @@ function calculateRoute() {
                     <div>
                         <p class="text-sm text-gray-600">Travel Time</p>
                         <p class="font-semibold">${travelTime}</p>
-                        ${trafficDuration !== normalDuration ? `<p class="text-xs text-gray-500">(${Math.round(normalDuration/60)} min without traffic)</p>` : ''}
+                        ${trafficDuration !== totalNormalDuration ? `<p class="text-xs text-gray-500">(${Math.round(totalNormalDuration/60)} min without traffic)</p>` : ''}
                     </div>
                     <div>
                         <p class="text-sm text-gray-600">Base Energy Consumption</p>
@@ -845,7 +999,7 @@ function calculateRoute() {
                         '<p class="text-sm text-gray-600 mt-2">Light traffic detected. Energy consumption adjusted for higher speeds.</p>' :
                         '<p class="text-sm text-gray-600 mt-2">Normal traffic conditions - standard energy consumption.</p>'
                     }
-                    ${!route.duration_in_traffic ? '<p class="text-xs text-gray-500 mt-1">⚠️ Traffic data unavailable - using base estimates</p>' : ''}
+                    ${!hasTrafficData ? '<p class="text-xs text-gray-500 mt-1">⚠️ Traffic data unavailable - using base estimates</p>' : ''}
                     ${modelMultiplier !== 1.0 ? `<p class="text-xs text-gray-500 mt-1">📊 Traffic model applied: ${trafficModel.value === 'pessimistic' ? 'Heavy (+20%)' : 'Light (-10%)'}</p>` : ''}
                 </div>
                 
@@ -888,7 +1042,7 @@ function showError(message) {
 }
 
 // Schema version for input storage (increment when changing input structure)
-const SCHEMA_VERSION = '1.1'; // Incremented for vehicle selection
+const SCHEMA_VERSION = '1.2'; // Incremented for waypoints support
 const STORAGE_KEY = 'evSocEstimatorInputs';
 
 // Save inputs to localStorage
@@ -902,7 +1056,8 @@ function saveInputs() {
         departureTime: departureTime.value,
         trafficModel: trafficModel.value,
         startPoint: startPoint.value,
-        destination: destination.value
+        destination: destination.value,
+        waypoints: waypoints.map(wp => wp.value)
     };
     localStorage.setItem(STORAGE_KEY, JSON.stringify(inputs));
 }
@@ -931,6 +1086,17 @@ function loadInputs() {
         if (inputs.trafficModel) trafficModel.value = inputs.trafficModel;
         if (inputs.startPoint) startPoint.value = inputs.startPoint;
         if (inputs.destination) destination.value = inputs.destination;
+        
+        // Restore waypoints
+        if (inputs.waypoints && Array.isArray(inputs.waypoints)) {
+            inputs.waypoints.forEach((waypointValue, index) => {
+                if (waypointValue && waypointValue.trim() !== '') {
+                    addWaypoint();
+                    waypoints[index].element.value = waypointValue;
+                    waypoints[index].value = waypointValue;
+                }
+            });
+        }
         
         console.log('Inputs restored from localStorage');
     } catch (error) {
