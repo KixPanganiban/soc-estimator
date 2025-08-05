@@ -1,4 +1,6 @@
 // API Key Management Module
+import appState from './appState.js';
+
 let userApiKey = '';
 
 // Check if API key is stored in localStorage
@@ -37,6 +39,7 @@ function handleChangeApiKey() {
 // Load Google Maps with user-provided API key
 function loadWithApiKey(apiKey) {
     userApiKey = apiKey;
+    appState.setApiKey(apiKey);
     localStorage.setItem('googleMapsApiKey', apiKey);
     loadGoogleMapsScript(apiKey);
 }
@@ -64,7 +67,7 @@ function loadGoogleMapsScript(apiKey) {
 }
 
 // Make initMap globally accessible
-window.initMap = function() {
+window.initMap = async function() {
     try {
         const apiKeySection = document.getElementById('api-key-section');
         const mainContent = document.getElementById('main-content');
@@ -73,23 +76,25 @@ window.initMap = function() {
         apiKeySection.classList.add('hidden');
         mainContent.classList.remove('hidden');
         
-        // Initialize map with callback
-        if (typeof window.initializeMap === 'function') {
-            window.initializeMap();
-        }
+        // Initialize map by importing the module
+        const { initializeMap, addMapEventListeners } = await import('./mapInitializer.js');
+        initializeMap();
+        
+        // Add map event listeners
+        addMapEventListeners();
         
         // Update departure time options
-        if (typeof window.updateDepartureTimeOptions === 'function') {
-            window.updateDepartureTimeOptions();
-        }
+        const { updateDepartureTimeOptions } = await import('./inputManager.js');
+        updateDepartureTimeOptions();
         
         // Load saved inputs and set up persistence after map loads
-        if (typeof window.loadInputs === 'function') {
-            window.loadInputs();
-        }
-        if (typeof window.setupInputPersistence === 'function') {
-            window.setupInputPersistence();
-        }
+        const { loadInputs, setupInputPersistence } = await import('./inputManager.js');
+        loadInputs();
+        setupInputPersistence();
+        
+        // Set appState as initialized
+        const appStateModule = await import('./appState.js');
+        appStateModule.default.setInitialized(true);
     } catch (error) {
         console.error('Error initializing Google Maps:', error);
         const apiKeySection = document.getElementById('api-key-section');

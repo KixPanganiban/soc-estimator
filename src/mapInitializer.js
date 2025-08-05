@@ -1,7 +1,5 @@
 // Google Maps Initialization Module
-let map;
-let directionsService;
-let directionsRenderer;
+import appState from './appState.js';
 
 // Initialize Google Maps
 function initializeMap() {
@@ -10,13 +8,13 @@ function initializeMap() {
     const startPoint = document.getElementById('start-point');
     const destination = document.getElementById('destination');
     
-    map = new google.maps.Map(mapDiv, {
+    const map = new google.maps.Map(mapDiv, {
         center: { lat: 14.6091, lng: 121.0223 }, // Default to Manila, Philippines
         zoom: 10,
     });
 
-    directionsService = new google.maps.DirectionsService();
-    directionsRenderer = new google.maps.DirectionsRenderer({
+    const directionsService = new google.maps.DirectionsService();
+    const directionsRenderer = new google.maps.DirectionsRenderer({
         suppressPolylines: true, // We'll draw our own colored segments
         preserveViewport: false
     });
@@ -25,10 +23,10 @@ function initializeMap() {
     const startAutocomplete = new google.maps.places.Autocomplete(startPoint);
     const destinationAutocomplete = new google.maps.places.Autocomplete(destination);
     
-    // Store map objects globally for access by other modules
-    window.map = map;
-    window.directionsService = directionsService;
-    window.directionsRenderer = directionsRenderer;
+    // Store map objects in centralized state
+    appState.setMap(map);
+    appState.setDirectionsService(directionsService);
+    appState.setDirectionsRenderer(directionsRenderer);
     
     console.log('Google Maps initialized successfully');
 }
@@ -41,34 +39,32 @@ function addMapEventListeners() {
     const destination = document.getElementById('destination');
     
     estimateBtn.addEventListener('click', () => {
-        if (typeof window.calculateRoute === 'function') {
-            window.calculateRoute();
-        }
+        // Use dynamic import to avoid circular dependencies
+        import('./routeCalculator.js').then(module => {
+            module.calculateRoute();
+        });
     });
     
     addWaypointBtn.addEventListener('click', () => {
-        if (typeof window.addWaypoint === 'function') {
-            window.addWaypoint();
-        }
+        import('./waypointManager.js').then(module => {
+            module.addWaypoint();
+        });
     });
     
     // Add enter key support
     [startPoint, destination].forEach(input => {
         input.addEventListener('keypress', (eSanitized) => {
             if (eSanitized.key === 'Enter') {
-                if (typeof window.calculateRoute === 'function') {
-                    window.calculateRoute();
-                }
+                import('./routeCalculator.js').then(module => {
+                    module.calculateRoute();
+                });
             }
         });
     });
 }
 
-// Export functions and variables for use in other modules
-export { 
-    initializeMap, 
-    addMapEventListeners,
-    map,
-    directionsService,
-    directionsRenderer
+// Export functions for use in other modules
+export {
+    initializeMap,
+    addMapEventListeners
 };

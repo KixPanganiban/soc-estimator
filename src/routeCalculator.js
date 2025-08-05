@@ -2,6 +2,7 @@
 import { getActiveWaypoints } from './waypointManager.js';
 import { analyzeRouteSegments } from './segmentAnalyzer.js';
 import { drawSegmentsOnMap, drawSegmentCharts } from './chartDrawer.js';
+import appState from './appState.js';
 
 // Format duration from seconds to human-readable text
 function formatDuration(seconds) {
@@ -124,9 +125,15 @@ function calculateRoute() {
     
     console.log('Directions request:', request);
 
-    // Access directions service from global window object
-    const directionsService = window.directionsService;
-    const directionsRenderer = window.directionsRenderer;
+    // Access directions service from centralized state
+    const directionsService = appState.getDirectionsService();
+    const directionsRenderer = appState.getDirectionsRenderer();
+    
+    if (!directionsService || !directionsRenderer) {
+        showError('Google Maps services not initialized. Please check your API key and refresh the page.');
+        estimateBtn.disabled = false;
+        return;
+    }
     
     directionsService.route(request, (result, status) => {
         estimateBtn.disabled = false;

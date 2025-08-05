@@ -1,17 +1,14 @@
 // Chart Drawing Module
-let segmentPolylines = [];
+import appState from './appState.js';
 
 // Clear previous segment polylines from map
 function clearSegmentPolylines() {
-    segmentPolylines.forEach(polyline => {
-        polyline.setMap(null);
-    });
-    segmentPolylines = [];
+    appState.clearSegmentPolylines();
 }
 
 // Draw colored segments on map
 function drawSegmentsOnMap(segments) {
-    clearSegmentPolylines();
+    appState.clearSegmentPolylines();
     
     segments.forEach(segment => {
         if (segment.polyline && segment.polyline.points) {
@@ -26,8 +23,9 @@ function drawSegmentsOnMap(segments) {
                 zIndex: 100
             });
             
-            polyline.setMap(window.map);
-            segmentPolylines.push(polyline);
+            const map = appState.getMap();
+            polyline.setMap(map);
+            appState.addSegmentPolyline(polyline);
             
             // Add info window on click
             const infoWindow = new google.maps.InfoWindow({
@@ -54,15 +52,8 @@ function drawSegmentsOnMap(segments) {
 
 // Draw charts for segment analysis
 function drawSegmentCharts(segments, startSoc, batteryCapacity) {
-    // Destroy any existing charts first
-    if (window.socChart && window.socChart instanceof Chart) {
-        window.socChart.destroy();
-        window.socChart = null;
-    }
-    if (window.efficiencyChart && window.efficiencyChart instanceof Chart) {
-        window.efficiencyChart.destroy();
-        window.efficiencyChart = null;
-    }
+    // Clear existing charts
+    appState.clearCharts();
     
     // Wait for DOM to update
     setTimeout(() => {
@@ -108,7 +99,7 @@ function drawSegmentCharts(segments, startSoc, batteryCapacity) {
                 prevPoint = currentPoint;
             });
             
-            window.socChart = new Chart(socCtx, {
+            const socChart = new Chart(socCtx, {
                 type: 'line',
                 data: {
                     datasets: datasets
@@ -158,6 +149,8 @@ function drawSegmentCharts(segments, startSoc, batteryCapacity) {
                     }
                 }
             });
+            
+            appState.setSocChart(socChart);
         }
         
         // Chart 2: Efficiency by segment
@@ -174,7 +167,7 @@ function drawSegmentCharts(segments, startSoc, batteryCapacity) {
             
             const colors = segments.map(segment => segment.color);
             
-            window.efficiencyChart = new Chart(effCtx, {
+            const efficiencyChart = new Chart(effCtx, {
                 type: 'bar',
                 data: {
                     labels: segments.map((_, i) => `${i + 1}`),
@@ -221,14 +214,15 @@ function drawSegmentCharts(segments, startSoc, batteryCapacity) {
                     }
                 }
             });
+            
+            appState.setEfficiencyChart(efficiencyChart);
         }
     }, 100);
 }
 
 // Export functions for use in other modules
-export { 
+export {
     clearSegmentPolylines,
     drawSegmentsOnMap,
-    drawSegmentCharts,
-    segmentPolylines
+    drawSegmentCharts
 };

@@ -1,10 +1,10 @@
 // Waypoint Management Module
-let waypoints = [];
-let waypointAutocompletes = [];
+import appState from './appState.js';
 
 // Add a new waypoint input
 function addWaypoint() {
     const waypointsContainer = document.getElementById('waypoints-container');
+    const waypoints = appState.getWaypoints();
     const waypointIndex = waypoints.length;
     const waypointDiv = document.createElement('div');
     waypointDiv.className = 'flex gap-2 waypoint-item';
@@ -25,36 +25,38 @@ function addWaypoint() {
     waypointDiv.appendChild(removeBtn);
     waypointsContainer.appendChild(waypointDiv);
     
-    // Add to waypoints array
-    waypoints.push({ element: waypointInput, value: '' });
+    // Add to centralized state
+    appState.addWaypoint({ element: waypointInput, value: '' });
     
     // Initialize Google Places autocomplete for the new waypoint
     if (typeof google !== 'undefined' && google.maps && google.maps.places) {
         const autocomplete = new google.maps.places.Autocomplete(waypointInput);
-        waypointAutocompletes.push(autocomplete);
+        appState.addWaypointAutocomplete(autocomplete);
         
         // Update waypoint value when place is selected
         waypointInput.addEventListener('change', () => {
+            const waypoints = appState.getWaypoints();
             waypoints[waypointIndex].value = waypointInput.value;
-            if (typeof window.saveInputs === 'function') {
-                window.saveInputs();
-            }
+            import('./inputManager.js').then(module => {
+                module.saveInputs();
+            });
         });
         
         // Also save on blur
         waypointInput.addEventListener('blur', () => {
+            const waypoints = appState.getWaypoints();
             waypoints[waypointIndex].value = waypointInput.value;
-            if (typeof window.saveInputs === 'function') {
-                window.saveInputs();
-            }
+            import('./inputManager.js').then(module => {
+                module.saveInputs();
+            });
         });
         
         // Add enter key support
         waypointInput.addEventListener('keypress', (e) => {
             if (e.key === 'Enter') {
-                if (typeof window.calculateRoute === 'function') {
-                    window.calculateRoute();
-                }
+                import('./routeCalculator.js').then(module => {
+                    module.calculateRoute();
+                });
             }
         });
     }
@@ -63,6 +65,7 @@ function addWaypoint() {
 // Remove a waypoint
 function removeWaypoint(index) {
     const waypointsContainer = document.getElementById('waypoints-container');
+    const waypoints = appState.getWaypoints();
     
     // Remove from DOM
     const waypointDivs = waypointsContainer.querySelectorAll('.waypoint-item');
@@ -72,9 +75,8 @@ function removeWaypoint(index) {
         }
     });
     
-    // Remove from arrays
-    waypoints.splice(index, 1);
-    waypointAutocompletes.splice(index, 1);
+    // Remove from centralized state
+    appState.removeWaypoint(index);
     
     // Re-index remaining waypoints
     const remainingDivs = waypointsContainer.querySelectorAll('.waypoint-item');
@@ -89,27 +91,20 @@ function removeWaypoint(index) {
         removeBtn.onclick = () => removeWaypoint(newIndex);
     });
     
-    // Update waypoints array indices
-    waypoints.forEach((waypoint, idx) => {
-        waypoint.index = idx;
-    });
-    
     // Save the updated waypoints
-    if (typeof window.saveInputs === 'function') {
-        window.saveInputs();
-    }
+    import('./inputManager.js').then(module => {
+        module.saveInputs();
+    });
 }
 
 // Get active waypoints (those with values)
 function getActiveWaypoints() {
-    return waypoints.filter(wp => wp.value && wp.value.trim() !== '');
+    return appState.getActiveWaypoints();
 }
 
-// Export functions and variables for use in other modules
-export { 
-    addWaypoint, 
-    removeWaypoint, 
-    getActiveWaypoints,
-    waypoints,
-    waypointAutocompletes
+// Export functions for use in other modules
+export {
+    addWaypoint,
+    removeWaypoint,
+    getActiveWaypoints
 };

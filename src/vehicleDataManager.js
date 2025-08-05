@@ -1,5 +1,5 @@
 // Vehicle Data Management Module
-let vehicleData = [];
+import appState from './appState.js';
 
 // Load vehicle data from CSV
 async function loadVehicleData() {
@@ -11,7 +11,7 @@ async function loadVehicleData() {
         const lines = csvText.trim().split('\n');
         const headers = lines[0].split(',');
         
-        vehicleData = lines.slice(1).map(line => {
+        const vehicleData = lines.slice(1).map(line => {
             const values = line.split(',');
             const vehicle = {};
             headers.forEach((header, index) => {
@@ -27,15 +27,18 @@ async function loadVehicleData() {
             return a.model.localeCompare(b.model);
         });
         
+        // Store in centralized state
+        appState.setVehicleData(vehicleData);
+        
         populateVehicleSelect();
         console.log(`Loaded ${vehicleData.length} vehicle models`);
         
         // After vehicle data is loaded, restore saved inputs if in main content
         const mainContent = document.getElementById('main-content');
         if (!mainContent.classList.contains('hidden')) {
-            if (typeof window.loadInputs === 'function') {
-                window.loadInputs();
-            }
+            import('./inputManager.js').then(module => {
+                module.loadInputs();
+            });
         }
     } catch (error) {
         console.error('Error loading vehicle data:', error);
@@ -51,6 +54,7 @@ function populateVehicleSelect() {
     
     // Group by brand
     const brands = {};
+    const vehicleData = appState.getVehicleData();
     vehicleData.forEach(vehicle => {
         if (!brands[vehicle.brand]) {
             brands[vehicle.brand] = [];
@@ -81,6 +85,7 @@ function handleVehicleSelection(e) {
     if (!e.target.value) return;
     
     const [brand, index] = e.target.value.split('-');
+    const vehicleData = appState.getVehicleData();
     const vehicle = vehicleData.find(v => v.brand === brand);
     
     if (vehicle) {
@@ -105,10 +110,9 @@ function handleVehicleSelection(e) {
     }
 }
 
-// Export functions and variables for use in other modules
-export { 
-    loadVehicleData, 
-    populateVehicleSelect, 
-    handleVehicleSelection,
-    vehicleData
+// Export functions for use in other modules
+export {
+    loadVehicleData,
+    populateVehicleSelect,
+    handleVehicleSelection
 };
