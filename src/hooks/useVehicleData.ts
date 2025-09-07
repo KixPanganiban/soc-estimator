@@ -7,7 +7,7 @@ export function useVehicleData() {
 
   const loadVehicles = useCallback(async () => {
     try {
-      const response = await fetch('/vehicles.csv');
+      const response = await fetch(`${import.meta.env.BASE_URL}vehicles.csv`);
       const text = await response.text();
       
       const lines = text.trim().split('\n');
